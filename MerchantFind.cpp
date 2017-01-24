@@ -7,12 +7,15 @@
 	The program is an attempt at record linkage. It's created for a take home assignment from Pearl Captital. The input files are 2 CSV files both with 
 	company information like name, phone number, zip code, etc. The goal is be able to link the record from both files while there is no unique identifier present
 	in both files. The approached adopted here is Deterministic record linkage or rules-based record linkage. It simply picks a few columns that are present 
-	in both files and fuzzy match each respectively. The one record with highest score (and also above threshold) will be considered a match. 
-	For the time allocated on this project, I only picked Phone, Company Name, Zip code and Street Address as identifiers. The problem with rules-based record linkage
-	is 1. It often needs to be preprocessed based on knowledge of data. Decrease of data quality leads noise in final score.
+	in both files and fuzzy match each respectively and produce a score. The one record with highest overall score (and also above threshold) will be considered a match. 
+	For the time allocated on this project, I only picked Phone, Company Name, Zip code and Street Address as identifiers. 
+	The problem with rules-based record linkage	is 1. It often needs to be preprocessed based on knowledge of data. Decrease of data quality leads noise in final score.
 	2. Rules are also based on knowledge of data. Even a small increase of complexity of data can result in large increase in the number of rules.
 	For future work, might be interested to move to probabilistic record linkage or machine learning.
 	wiki reading: https://en.wikipedia.org/wiki/Record_linkage#Deterministic_record_linkage
+	While researching the topic, I also found a sample program that utilizes cosine, Jaccard, dice, and overlap coefficients as similarity measures.
+	Would be interesting to try them out as well.
+	http://www.chokkan.org/software/simstring/
 */
 
 #include "stdafx.h"
@@ -50,12 +53,14 @@ int main(int argc, char *argv[])
 
 	vector<vector<string>> PCBFentries;	// PCBF entries are unique
 	unordered_map<string, int> PCBFDbaIndexMap; // A map from PCBF dba name to PCBFentries index
-	unordered_map<string, string> PCBFphoneMerchant;	// phone number to merchant name (dba) map
+	unordered_map<string, string> PCBFphoneMerchant;	// phone number to PCBF merchant name (dba) map. If a phone number in UCC can be found in PCBF, skip iterating the whole PCBF file.
 
+	// Not considering the possibility 2 different PCBF merchants can have same name.
 	unordered_map<string, int> merchantUCCFilings;	// Our ultimate goal, a company name <-> UCC filing count map
 	int totalMatchedUCCRecord(0);
 
-	// Important column index, we only care about a handlful columns. If there are too many will use a data structure.
+	// Important column indexes. Due to time constraint, only come up with score system based on those columns. In reality more data can contribute to the score system and improve accuracy.
+	// If there are too many will use a data structure.
 	int intPCBFdba(0), intPCBFphone(0), intPCBFZip, intPCBFStreet; // column is 0 based, PCBFentries[x][PCBFdba] will give you Dba
 	int intUCCcompany(0), intUCCPhone(0), intUCCZip, intUCCStreet;
 	string line;
@@ -85,7 +90,6 @@ int main(int argc, char *argv[])
 		string word;
 		PCBFentries.push_back(vector<string>());
 		while (getline(ss, word, '|')) {
-			// Might need to make word upper case here
 			int currentColumn = PCBFentries.back().size();
 			if (currentColumn == intPCBFphone || currentColumn == intPCBFZip) {
 				// process phone or zip, remove +1 . - etc
@@ -93,18 +97,13 @@ int main(int argc, char *argv[])
 			}
 			PCBFentries.back().push_back(word);
 		} // Read PCBF row finished
-		string merchant(PCBFentries.back()[intPCBFdba]), phonNum(PCBFentries.back()[intPCBFphone]), zip(PCBFentries.back()[intPCBFZip]);
+		string merchant(PCBFentries.back()[intPCBFdba]), phonNum(PCBFentries.back()[intPCBFphone]);
 		merchantUCCFilings[merchant] = 0;
 		if (phonNum.length() == 10)
 			PCBFphoneMerchant[phonNum] = merchant;
 		else
 			cout << "Merchant " << merchant << " has erroneous phone number: " << phonNum << endl;
-			
-		//if (zip.length() == 9 || zip.length() == 5)
-		//	PCBFZipMerchant[zip] = merchant;
-		//else
-		//	cout << "Merchant " << merchant << " has erroneous zip code: " << zip << endl;
-		//PCBFDbaIndexMap[toUpper(merchant)] = PCBFentries.size() - 1;
+
 		PCBFDbaIndexMap[merchant] = PCBFentries.size() - 1;
 
 	}	// / while (getline(fPCBF, line))
@@ -138,10 +137,8 @@ int main(int argc, char *argv[])
 		bool phoneMatch(false);
 		int companyMatchScore(-1);
 		while (getline(ss, word, '|')) {
-			// Might need to make word upper case
 			int currentColumn = uccRow.size();
 			if (currentColumn == intUCCPhone || currentColumn == intUCCZip) {
-				// process phone, remove +1 . - etc
 				processPhoneNumOrZip(word, currentColumn == intUCCZip);
 			}
 			uccRow.push_back(word);
@@ -158,7 +155,6 @@ int main(int argc, char *argv[])
 			//cout << "Just checked UCC company " << strUCCcompany << ", no need to perform check again." << endl;
 			continue;
 		}
-		//cout << "Read UCC company " << strUCCcompany << endl;
 		// Phone number is a strong match, use phone number map to speed things up rather than iterate through all PCBF entries
 		unordered_map<string, string>::const_iterator it = PCBFphoneMerchant.find(strUCCPhone);
 		if (it != PCBFphoneMerchant.end()) {
@@ -182,8 +178,6 @@ int main(int argc, char *argv[])
 				lastCheckPCBFName = strPCBFMerchantName;
 			}
 			else {
-				//cout << "Phone numbers match for " << strPCBFMerchantName << ", but total score not hight enough."
-				//	<< " UCC company name " << uccRow[intUCCcompany] << endl;
 				cout << strPCBFMerchantName << ": phone - " << INT_PHONE_SCORE << ", zip - " << zipScore << ", name - " << companyNameScore
 					<< ", UCC name: " << uccRow[intUCCcompany] << endl;
 			}
@@ -216,7 +210,7 @@ int main(int argc, char *argv[])
 			if (!bestMatchName.empty()) {
 				cout << strUCCcompany << " matched to " << bestMatchName << " with score: " << maxScore << ", zip score: " << msZip << ", name score: " << msName
 					<< ", address score: " << msStreet << endl;
-				if (score > 50) {
+				if (score > 50) {	// Just a ballpark estimate
 					merchantUCCFilings[bestMatchName] ++;
 					totalMatchedUCCRecord++;
 				}
@@ -225,7 +219,6 @@ int main(int argc, char *argv[])
 			}
 		}
 	}	// / while (getline(fUCCfile, line))
-	//cout << "Total matched UCC record: " << totalMatchedUCCRecord << ", remaining UCC record " << endl;
 	fUCCfile.close();
 
 	// show top 10
@@ -245,7 +238,3 @@ int main(int argc, char *argv[])
 
     return 0;
 }
-
-/*
-	Record processing
-*/
